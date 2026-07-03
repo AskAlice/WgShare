@@ -142,5 +142,11 @@ if [ "${SKIP_KDECONNECT:-0}" != "1" ]; then
     patch_app kdeconnect "kdeconnect-revanced-${VER_NAME}" "${KC_APKS[@]}"
 fi
 
+# Fail loudly if a patched bundle we expected is missing, so CI never ships/attaches without it.
+[ "${SKIP_SWIFTKEY:-0}" = "1" ] || [ -f "$OUT/swiftkey-revanced-${VER_NAME}.zip" ] \
+    || { echo "expected $OUT/swiftkey-revanced-${VER_NAME}.zip missing" >&2; exit 1; }
+[ "${SKIP_KDECONNECT:-0}" = "1" ] || [ -f "$OUT/kdeconnect-revanced-${VER_NAME}.zip" ] \
+    || { echo "expected $OUT/kdeconnect-revanced-${VER_NAME}.zip missing" >&2; exit 1; }
+
 ( cd "$OUT" && sha256sum ./*.apk ./*.zip 2>/dev/null > SHA256SUMS )
-log "Done. Artifacts in $OUT"
+log "Done. Artifacts in $OUT ($(ls "$OUT"/*.zip 2>/dev/null | wc -l) patched bundle(s))"
