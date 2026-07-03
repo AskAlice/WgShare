@@ -53,93 +53,68 @@ connected the app shows "Tailscale offline" and prompts the user to connect.
 | `core/Repo.kt` | Wires identity + Tailscale + server + send/receive logic |
 | `core/KdeConnect.kt` | Forwards captured clips to the local KDE Connect app (primary sync) |
 | `service/SyncService.kt` | Foreground service keeping the listener alive |
-| `core/ClipboardPushReceiver.kt` | Receives clipboard text pushed by the SwiftKey LSPosed hook |
+| `core/ClipboardPushReceiver.kt` | Receives clipboard text pushed by the patched SwiftKey |
 | `ui/` | Jetpack Compose: History (default), Devices/fallback, Pair, Messages |
-| `:xposed` module | LSPosed module: `ClipboardHook` (SwiftKey capture) + `KdeConnectInjector` (KDE Connect inject) |
+| `revanced/` | Standalone ReVanced project: patches (SwiftKey, KDE Connect) + extensions (injected code) |
 
-## Background clipboard sync (LSPosed / SwiftKey)
+## Background clipboard sync (ReVanced patches)
 
-Android 10+ only lets the **foreground app** or the **default IME** read the clipboard, so the
-main app can't silently capture copies. The `:xposed` module works around this: SwiftKey is an IME,
-so code injected into its process (via [LSPosed](https://github.com/LSPosed/LSPosed)) can read the
-clipboard in the background.
-
-```
-SwiftKey process (Xposed hook)                     WgShare process              peers
-  OnPrimaryClipChangedListener ──broadcast(text)──► ClipboardPushReceiver ──► Repo.onExternalClipboard ──► CLIPBOARD envelope ──► tailnet
-```
-
-- The hook uses two capture paths feeding one de-duplicated push:
-  1. **Internal hook** — hooks SwiftKey's own "add clip to history" method
-     (`w90.q#a(w90.x, nz.o0)`, text = field `w90.x#a`), verified against **SwiftKey 9.13.10.6**.
-     Precise (honours SwiftKey's incognito / `clipboard_is_enabled` gating) but obfuscation-pinned;
-     if a SwiftKey update renames these it silently no-ops.
-  2. **Public listener** — a `ClipboardManager.OnPrimaryClipChangedListener`, version-proof, always
-     registered, so sync keeps working even if path 1 breaks after a SwiftKey update.
-- On each captured copy it sends an explicit broadcast
-  (`dev.alice.wgshare.action.CLIPBOARD_PUSH`) to WgShare.
-- The receiver is `exported` but guarded by the **signature-level** permission
-  `dev.alice.wgshare.permission.CLIPBOARD_PUSH`, so only an APK signed with the *same key* as
-  WgShare (i.e. this hook) can invoke it. Debug builds share the debug keystore, so this works
-  out of the box; for release, sign both APKs with the same key.
-- A `lastPush` de-dup in the hook prevents an infinite echo when a synced clip is written back to
-  the local clipboard.
-
-## Injecting into KDE Connect (primary sync)
-
-Rather than reimplement device sync, WgShare hands each captured clip to the **local** KDE Connect
-app, which emits a real `kdeconnect.clipboard` packet to every paired device. KDE Connect is
-open-source and unobfuscated, so the hook is stable across versions.
+Android 10+ only lets the **foreground app** or the **default IME** read the clipboard, so the main
+app can't silently capture copies. Instead of runtime Xposed/LSPosed hooks, WgShare ships
+**[ReVanced](https://github.com/ReVanced/revanced-patcher) patches** that *statically* rewrite the
+SwiftKey and KDE Connect APKs at build time (patcher + extension DEX + `revanced-cli`), then sign
+them with our key. No root, no LSPosed.
 
 ```
-WgShare ──broadcast(KDECONNECT_CLIP, text)──► KdeConnectInjector (inside org.kde.kdeconnect_tp)
-                                                └─ KdeConnect.getInstance().getDevices()
-                                                     └─ per paired+reachable device:
-                                                          ClipboardPlugin.propagateClipboard(text)
+copy → patched SwiftKey (extension listener) ──broadcast(CLIPBOARD_PUSH)──► WgShare.ClipboardPushReceiver
+                                                                              └─► history + KdeConnect.push
+WgShare ──broadcast(KDECONNECT_CLIP)──► patched KDE Connect (extension receiver)
+                                          └─ KdeConnect.getInstance().getDevices()
+                                               └─ per paired+reachable device: ClipboardPlugin.propagateClipboard(text)
 ```
 
-- We pass the **text directly** (not via the system clipboard) because Android 10+ blocks
-  background clipboard reads even for KDE Connect.
-- The receiver is registered dynamically and guarded by the same signature-level
-  `dev.alice.wgshare.permission.CLIPBOARD_PUSH`, so only WgShare (same signing key) can push.
-- Enable the module's **KDE Connect** scope in LSPosed (already in `xposedscope`), alongside SwiftKey.
-- `propagateClipboard` is `private` in KDE Connect; the hook invokes it via reflection
-  (`XposedHelpers.callMethod`). Verified against the current `org.kde.kdeconnect.Plugins`
-  `ClipboardPlugin` API; if KDE Connect renames it, the hook logs and no-ops (SwiftKey→history still works).
+Layout of the standalone `revanced/` project (own Gradle build + settings plugin):
 
-### Install (rooted, LSPosed)
-1. Build and install both APKs: `./gradlew :app:installDebug :xposed:installDebug`.
-2. Root device with LSPosed (Zygisk) installed.
-3. In LSPosed → Modules, enable **WgShare Clipboard Hook** and tick **SwiftKey** *and*
-   **KDE Connect** in its scope. Install KDE Connect and pair your desktop with it.
-4. Force-stop SwiftKey + KDE Connect (or reboot) so the hooks load. Copy text anywhere → it lands in
-   WgShare's history and syncs to your devices via KDE Connect.
+| Path | Role |
+|------|------|
+| `revanced/patches/…/SwiftKeyClipboardPatch.kt` | injects `ClipboardBroadcaster.install()` into SwiftKey startup |
+| `revanced/patches/…/KdeConnectClipboardPatch.kt` | injects `KdeConnectInjector.install()` into KDE Connect startup |
+| `revanced/extensions/swiftkey/…/ClipboardBroadcaster.java` | registers a clipboard listener, broadcasts each copy to WgShare |
+| `revanced/extensions/kdeconnect/…/KdeConnectInjector.java` | receives WgShare's push, calls `ClipboardPlugin.propagateClipboard` |
 
-### Install (rootless, LSPatch)
-The release pipeline (below) also produces a **LSPatch-patched SwiftKey** with the hook embedded, so
-no root is needed:
-1. Install `wgshare-<ver>.apk`.
-2. Uninstall stock SwiftKey, then install the split APKs from `swiftkey-lspatched-<ver>.zip`
-   together (e.g. with `tiny-apk-installer`, or `adb install-multiple *.apk`).
-3. Enable the patched SwiftKey as your keyboard. Copies sync automatically.
+- **SwiftKey** (IME) is patched to register a `ClipboardManager.OnPrimaryClipChangedListener` on
+  startup and broadcast copies. Version-proof (public API), so no obfuscation-pinned symbols.
+- **KDE Connect** (open-source, unobfuscated) is patched so its Application (`org.kde.kdeconnect.KdeConnect`)
+  registers a guarded receiver and pushes text into `ClipboardPlugin.propagateClipboard` (private →
+  reflection); KDE Connect then syncs it via its own transport/pairing (and its SMS + notifications).
+- The broadcast is guarded by the **signature-level** permission `CLIPBOARD_PUSH`; because
+  `revanced-cli` re-signs both apps with the **same key** as WgShare, the senders hold it.
 
-Because the patched SwiftKey is signed with the **same key** as WgShare, the sender holds the
-`CLIPBOARD_PUSH` signature permission — the whole point of signing everything with one key.
-
-### Re-deriving the internal hook symbols
-The obfuscated names in path 1 are specific to a SwiftKey build. To refresh them after an update:
+### Building the patch bundle
+The `revanced/` build needs **GitHub Packages auth** for the ReVanced gradle plugin + patcher
+(`read:packages` token → `githubPackagesUsername`/`githubPackagesPassword`). Then:
 
 ```zsh
-apkeep -a com.touchtype.swiftkey -d apk-pure reverse/swiftkey            # downloads a .xapk
-bsdtar -xf reverse/swiftkey/com.touchtype.swiftkey.xapk -C reverse/swiftkey/xapk
-jadx --no-res --no-debug-info -d reverse/swiftkey/jadx-out reverse/swiftkey/xapk/com.touchtype.swiftkey.apk
-rg -l 'clipboard_is_enabled|getPrimaryClip' reverse/swiftkey/jadx-out    # find the clip store class
+cd revanced && ./gradlew build      # -> revanced/patches/build/libs/*.rvp
 ```
 
-Locate the class whose `a(item, source)` inserts into clip history (the `LocalClipboardItem` toString
-gives it away) and update the `CLIP_*` constants in `ClipboardHook.kt`. The `/reverse/` dir is
-git-ignored. The public-listener path needs no decompilation, so the module still functions without
-this step.
+### Install (rootless)
+The release pipeline (below) patches + signs everything:
+1. Install `wgshare-<ver>.apk`.
+2. Uninstall stock SwiftKey, install the APKs from `swiftkey-revanced-<ver>.zip` together
+   (`adb install-multiple *.apk`). Enable it as your keyboard.
+3. Uninstall stock KDE Connect, install `kdeconnect-revanced-<ver>.zip`; pair your desktop.
+4. Copy text anywhere → lands in WgShare history and syncs via KDE Connect.
+
+### Refreshing patch anchors after an app update
+Patches locate methods by fingerprint. If SwiftKey/KDE Connect change, decompile and adjust the
+fingerprints in the patch files (the `/reverse/` dir is git-ignored):
+
+```zsh
+apkeep -a com.touchtype.swiftkey -d apk-pure reverse/swiftkey
+apkeep -a org.kde.kdeconnect_tp  -d f-droid  reverse/kdeconnect
+jadx --no-res -d reverse/swiftkey/jadx reverse/swiftkey/*.apk    # inspect onCreate anchors
+```
 
 ## Build
 
@@ -159,19 +134,19 @@ Opening the folder in Android Studio also generates the wrapper and syncs deps.
 
 ## Release pipeline
 
-One pipeline builds and signs all three artifacts with the **same key**, and patches SwiftKey via
-[LSPatch](https://github.com/JingMatrix/LSPatch):
+One pipeline builds and signs everything with the **same key**, and patches SwiftKey + KDE Connect
+with [`revanced-cli`](https://github.com/ReVanced/revanced-cli) using our patch bundle:
 
 | Artifact | What |
 |----------|------|
 | `wgshare-<ver>.apk` | the app |
-| `wgshare-clipboard-hook-<ver>.apk` | standalone module for rooted LSPosed |
-| `swiftkey-lspatched-<ver>.zip` | SwiftKey with the hook embedded, for rootless LSPatch |
+| `swiftkey-revanced-<ver>.zip` | SwiftKey patched with the clipboard-capture patch |
+| `kdeconnect-revanced-<ver>.zip` | KDE Connect patched with the clipboard-inject patch |
 
 Versioning uses git tags: final releases `vX.Y.Z`, release candidates `vX.Y.Z-rc.N`. The
 `scripts/build-release.sh` step is the single source of truth shared by CI and local runs; it
-builds the app + module, converts the signing key to BKS (LSPatch's keystore format), downloads
-`lspatch.jar`, fetches SwiftKey with `apkeep`, then patches + signs.
+builds the app, builds the ReVanced patch bundle (`revanced/`), downloads `revanced-cli`, fetches
+SwiftKey (apk-pure) + KDE Connect (f-droid) with `apkeep`, then patches + signs with our key.
 
 ### Signing key
 Create one keystore, reused everywhere:
@@ -200,7 +175,7 @@ Same steps, same script:
 scripts/release-local.sh rc patch              # build + resolve next rc (dry, no tag)
 scripts/release-local.sh rc patch --tag        # also create + push the tag
 scripts/release-local.sh release minor --publish  # final release + GitHub release via gh
-scripts/release-local.sh rc patch --no-patch   # app + module only (skip SwiftKey/LSPatch)
+scripts/release-local.sh rc patch --no-patch   # app only (skip ReVanced patching)
 ```
 
 `scripts/version.sh resolve <mode> <bump>` prints the resolved `VER_NAME/VER_CODE/TAG` if you just
@@ -212,7 +187,7 @@ want the numbers. To run the actual GitHub Actions workflow locally instead, use
 
 - **Clipboard read** — Android 10+ only lets an app read the clipboard while it
   is foreground, so in-app "Send clipboard" is a foreground button action. For
-  silent background capture, install the `:xposed` SwiftKey hook (see above).
+  silent background capture, install the ReVanced-patched SwiftKey (see above).
 - **NAT traversal** — handled by Tailscale (direct WireGuard where possible, DERP
   relay fallback). Devices don't need to be on the same LAN, but both must be on
   the same tailnet and connected.
