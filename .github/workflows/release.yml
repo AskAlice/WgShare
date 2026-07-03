@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "rc = tagged release candidate (prerelease); release = final semver"
+        type: choice
+        options: [rc, release]
+        default: rc
+      bump:
+        description: "How to bump the latest final release for this version"
+        type: choice
+        options: [patch, minor, major, none]
+        default: patch
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need all tags for version resolution
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "8.9"
+
+      - uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: sdkmanager "platforms;android-34" "build-tools;34.0.0"
+
+      - name: Install apkeep
+        run: |
+          url=$(curl -fsSL https://api.github.com/repos/EFForg/apkeep/releases/latest \
+            | grep -oE 'https://[^"]+apkeep-x86_64-unknown-linux-gnu' | head -n1)
+          sudo curl -fsSL -o /usr/local/bin/apkeep "$url"
+          sudo chmod +x /usr/local/bin/apkeep
+          apkeep --version
+
+      - name: Resolve version
+        id: ver
+        env:
+          MODE: ${{ inputs.mode }}
+          BUMP: ${{ inputs.bump }}
+        run: bash scripts/version.sh resolve "$MODE" "$BUMP" >> "$GITHUB_OUTPUT"
+
+      - name: Fail if tag already exists
+        env:
+          TAG: ${{ steps.ver.outputs.TAG }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$TAG" >/dev/null; then
+            echo "tag $TAG already exists" >&2; exit 1
+          fi
+
+      - name: Decode keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          test -n "$KEYSTORE_B64" || { echo "missing secret KEYSTORE_B64" >&2; exit 1; }
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.ks"
+
+      - name: Build + patch + sign
+        env:
+          VER_NAME: ${{ steps.ver.outputs.VER_NAME }}
+          VER_CODE: ${{ steps.ver.outputs.VER_CODE }}
+          KEYSTORE: ${{ runner.temp }}/release.ks
+          KEYSTORE_PASS: ${{ secrets.KEYSTORE_PASS }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASS: ${{ secrets.KEY_PASS }}
+        run: bash scripts/build-release.sh
+
+      - name: Create tag
+        env:
+          TAG: ${{ steps.ver.outputs.TAG }}
+        run: |
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.TAG }}
+          name: ${{ steps.ver.outputs.TAG }}
+          prerelease: ${{ steps.ver.outputs.PRERELEASE == 'true' }}
+          generate_release_notes: true
+          files: dist/*
