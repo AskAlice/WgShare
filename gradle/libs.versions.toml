@@ -12,7 +12,6 @@ coroutines = "1.10.1"
 zxing = "3.5.3"
 camerax = "1.4.2"
 mlkitBarcode = "17.3.0"
-xposed = "82"
 
 [libraries]
 core-ktx = { module = "androidx.core:core-ktx", version.ref = "coreKtx" }
@@ -36,7 +35,6 @@ camerax-camera2 = { module = "androidx.camera:camera-camera2", version.ref = "ca
 camerax-lifecycle = { module = "androidx.camera:camera-lifecycle", version.ref = "camerax" }
 camerax-view = { module = "androidx.camera:camera-view", version.ref = "camerax" }
 mlkit-barcode = { module = "com.google.mlkit:barcode-scanning", version.ref = "mlkitBarcode" }
-xposed-api = { module = "de.robv.android.xposed:api", version.ref = "xposed" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

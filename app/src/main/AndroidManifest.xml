@@ -10,7 +10,7 @@
 
     <uses-feature android:name="android.hardware.camera.any" android:required="false" />
 
-    <!-- Only apps signed with our key (i.e. the :xposed hook APK) may push captured clipboard text. -->
+    <!-- Only apps signed with our key (the ReVanced-patched SwiftKey/KDE Connect) may push clipboard. -->
     <permission
         android:name="dev.alice.wgshare.permission.CLIPBOARD_PUSH"
         android:protectionLevel="signature" />
@@ -46,7 +46,7 @@
             android:exported="false"
             android:foregroundServiceType="dataSync" />
 
-        <!-- Receives clipboard text captured by the SwiftKey LSPosed hook (:xposed module). -->
+        <!-- Receives clipboard text captured by the ReVanced-patched SwiftKey. -->
         <receiver
             android:name=".core.ClipboardPushReceiver"
             android:exported="true"

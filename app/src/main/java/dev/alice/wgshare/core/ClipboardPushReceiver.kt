@@ -6,7 +6,7 @@ import android.content.Intent
 import dev.alice.wgshare.service.SyncService
 
 /**
- * Receives clipboard text pushed by the SwiftKey LSPosed hook (see :xposed) and relays it to peers.
+ * Receives clipboard text pushed by the ReVanced-patched SwiftKey (see revanced/) and relays it.
  * Exported but guarded by the signature-level [ACTION]-matching permission declared in the manifest,
  * so only same-key-signed senders (our hook APK) can invoke it.
  */

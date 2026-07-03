@@ -36,8 +36,8 @@ android {
         release {
             isMinifyEnabled = false
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
-            // Same key as :xposed and the LSPatch output, so the signature-level clipboard
-            // permission is honoured across all three APKs.
+            // Same key as the ReVanced-patched SwiftKey/KDE Connect, so the signature-level
+            // clipboard permission is honoured across all APKs.
             signingConfig = signingConfigs.findByName("release") ?: signingConfigs.getByName("debug")
         }
     }

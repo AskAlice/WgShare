@@ -10,10 +10,11 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
-        maven("https://api.xposed.info/") // classic Xposed/LSPosed API artifacts
     }
 }
 
+// The ReVanced patches live in a self-contained Gradle build under revanced/ (its own settings +
+// ReVanced patches gradle plugin, which needs GitHub Packages auth). It is intentionally NOT part
+// of this app build.
 rootProject.name = "WgShare"
 include(":app")
-include(":xposed")

@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <!-- LSPosed reads this to pre-select which apps the module hooks. -->
-    <string-array name="xposedscope">
-        <item>com.touchtype.swiftkey</item>
-        <item>com.touchtype.swiftkey.beta</item>
-        <item>org.kde.kdeconnect_tp</item>
-    </string-array>
-</resources>
