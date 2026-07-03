@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">WgShare</string>
+    <string name="service_running">Tunnel active — listening for peers</string>
+</resources>
