@@ -85,8 +85,9 @@ Layout of the standalone `revanced/` project (own Gradle build + settings plugin
 - **SwiftKey** (IME) is patched to register a `ClipboardManager.OnPrimaryClipChangedListener` on
   startup and broadcast copies. Version-proof (public API), so no obfuscation-pinned symbols.
 - **KDE Connect** (open-source, unobfuscated) is patched so its Application (`org.kde.kdeconnect.KdeConnect`)
-  registers a guarded receiver and pushes text into `ClipboardPlugin.propagateClipboard` (private →
-  reflection); KDE Connect then syncs it via its own transport/pairing (and its SMS + notifications).
+  registers a guarded receiver and pushes text into `ClipboardPlugin.propagateClipboard(String)` (public;
+  invoked via reflection since the extension has no compile-time dep on KDE Connect); KDE Connect then
+  syncs it via its own transport/pairing (and its SMS + notifications). Verified against the F-Droid build.
 - The broadcast is guarded by the **signature-level** permission `CLIPBOARD_PUSH`; because
   `revanced-cli` re-signs both apps with the **same key** as WgShare, the senders hold it.
 

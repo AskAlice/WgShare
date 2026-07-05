@@ -19,12 +19,12 @@ val swiftKeyClipboardPatch = bytecodePatch(
     extendWith("extensions/swiftkey.rve")
 
     apply {
-        // TODO(verify): confirm against the decompiled SwiftKey APK. The manifest-declared IME
-        // service class name is the most stable anchor (obfuscation rarely renames it); adjust the
-        // suffix/type if a build differs. `p0` in onCreate is the service (a Context).
+        // Verified against SwiftKey (com.touchtype.swiftkey): the manifest-declared IME service
+        // com.touchtype.KeyboardService declares `public onCreate()V`. Unobfuscated + stable anchor.
+        // `p0` in onCreate is the service instance (InputMethodService -> Service -> Context).
         val onCreate = firstMethod {
             name("onCreate")
-            custom { _, classDef -> classDef.type.endsWith("KeyboardService;") }
+            custom { _, classDef -> classDef.type == "Lcom/touchtype/KeyboardService;" }
         }
         onCreate.addInstructions(
             0,
