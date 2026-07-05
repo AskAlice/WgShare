@@ -1,3 +1,5 @@
+version = (project.findProperty("verName") as String?)?.ifBlank { null } ?: "1.0.0"
+
 patches {
     about {
         name = "WgShare Patches"

@@ -55,8 +55,9 @@ fi
 rvp=${PATCHES_RVP:-}
 if [ -z "$rvp" ]; then
     log "Building ReVanced patches (revanced/) — needs GitHub Packages auth for the RV gradle plugin"
-    ( cd revanced && { [ -x ./gradlew ] && ./gradlew --no-daemon build || gradle --no-daemon build; } )
-    rvp=$(ls revanced/patches/build/libs/*.rvp revanced/**/build/**/*.rvp 2>/dev/null | head -n1)
+    ( cd revanced && { [ -x ./gradlew ] && G=./gradlew || G=gradle; "$G" --no-daemon -PverName="$VER_NAME" build; } )
+    # Pick the patch bundle, never the -sources bundle.
+    rvp=$(ls revanced/patches/build/libs/*.rvp 2>/dev/null | grep -v -- '-sources\.rvp' | head -n1)
 fi
 [ -n "$rvp" ] && [ -f "$rvp" ] || { echo "no .rvp patch bundle found (set PATCHES_RVP)" >&2; exit 1; }
 log "patch bundle: $rvp"
