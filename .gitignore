@@ -1,6 +1,6 @@
 *.iml
 .gradle/
-/local.properties
+local.properties
 /.idea/
 .DS_Store
 **/build/
@@ -23,3 +23,6 @@
 /.snapshots/
 /.metals/
 /.vscode/
+.env
+.env.*
+*.env
