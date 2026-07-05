@@ -1,5 +1,7 @@
 package app.revanced.patches.wgshare
 
+import app.revanced.patcher.extensions.InstructionExtensions.addInstructions
+import app.revanced.patcher.fingerprint
 import app.revanced.patcher.patch.bytecodePatch
 
 /**
@@ -12,6 +14,13 @@ import app.revanced.patcher.patch.bytecodePatch
  * is reliable. Injected code lives in `extensions/kdeconnect`
  * (`app.revanced.extension.kdeconnect.KdeConnectInjector`).
  */
+internal val kdeConnectOnCreateFingerprint = fingerprint {
+    returns("V")
+    custom { method, classDef ->
+        method.name == "onCreate" && classDef.type == "Lorg/kde/kdeconnect/KdeConnect;"
+    }
+}
+
 val kdeConnectClipboardPatch = bytecodePatch(
     name = "KDE Connect clipboard inject",
     description = "Let WgShare push captured clipboard text into KDE Connect for device sync.",
@@ -19,12 +28,9 @@ val kdeConnectClipboardPatch = bytecodePatch(
     compatibleWith("org.kde.kdeconnect_tp")
     extendWith("extensions/kdeconnect.rve")
 
-    apply {
-        val onCreate = firstMethod {
-            name("onCreate")
-            custom { _, classDef -> classDef.type == "Lorg/kde/kdeconnect/KdeConnect;" }
-        }
-        onCreate.addInstructions(
+    execute {
+        // `p0` in onCreate is the KdeConnect application instance (Application -> Context).
+        kdeConnectOnCreateFingerprint.method.addInstructions(
             0,
             "invoke-static { p0 }, " +
                 "Lapp/revanced/extension/kdeconnect/KdeConnectInjector;->install(Landroid/content/Context;)V",

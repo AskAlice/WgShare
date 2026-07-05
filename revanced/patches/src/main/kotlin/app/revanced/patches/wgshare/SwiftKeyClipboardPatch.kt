@@ -1,5 +1,7 @@
 package app.revanced.patches.wgshare
 
+import app.revanced.patcher.extensions.InstructionExtensions.addInstructions
+import app.revanced.patcher.fingerprint
 import app.revanced.patcher.patch.bytecodePatch
 
 /**
@@ -11,6 +13,15 @@ import app.revanced.patcher.patch.bytecodePatch
  * The injected code lives in the `extensions/swiftkey` extension
  * (`app.revanced.extension.swiftkey.ClipboardBroadcaster`).
  */
+internal val swiftKeyOnCreateFingerprint = fingerprint {
+    returns("V")
+    // Verified against SwiftKey (com.touchtype.swiftkey): the manifest-declared IME service
+    // com.touchtype.KeyboardService declares `public onCreate()V`. Unobfuscated + stable anchor.
+    custom { method, classDef ->
+        method.name == "onCreate" && classDef.type == "Lcom/touchtype/KeyboardService;"
+    }
+}
+
 val swiftKeyClipboardPatch = bytecodePatch(
     name = "SwiftKey clipboard capture",
     description = "Broadcast copied text to WgShare for clipboard history + KDE Connect sync.",
@@ -18,15 +29,9 @@ val swiftKeyClipboardPatch = bytecodePatch(
     compatibleWith("com.touchtype.swiftkey")
     extendWith("extensions/swiftkey.rve")
 
-    apply {
-        // Verified against SwiftKey (com.touchtype.swiftkey): the manifest-declared IME service
-        // com.touchtype.KeyboardService declares `public onCreate()V`. Unobfuscated + stable anchor.
+    execute {
         // `p0` in onCreate is the service instance (InputMethodService -> Service -> Context).
-        val onCreate = firstMethod {
-            name("onCreate")
-            custom { _, classDef -> classDef.type == "Lcom/touchtype/KeyboardService;" }
-        }
-        onCreate.addInstructions(
+        swiftKeyOnCreateFingerprint.method.addInstructions(
             0,
             "invoke-static { p0 }, " +
                 "Lapp/revanced/extension/swiftkey/ClipboardBroadcaster;->install(Landroid/content/Context;)V",

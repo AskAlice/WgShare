@@ -2,3 +2,12 @@
 extension {
     name = "extensions/kdeconnect.rve"
 }
+
+android {
+    defaultConfig {
+        minSdk = 24
+    }
+    lint {
+        abortOnError = false
+    }
+}
