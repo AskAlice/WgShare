@@ -7,8 +7,8 @@
 # Required env:
 #   VER_NAME, VER_CODE            version to stamp (see scripts/version.sh)
 # Signing (required for a real release; if absent, builds debug-signed and skips patching):
-#   KEYSTORE                      path to PKCS12/JKS keystore
-#   KEYSTORE_PASS, KEY_ALIAS, KEY_PASS
+#   KEY
+#   KEYSTORE_PASS, KEY_ALIAS, KEY_PASSSTORE                      path to PKCS12/JKS keystore
 # Optional:
 #   SWIFTKEY_APK | SWIFTKEY_XAPK  prebuilt SwiftKey artifact; else downloaded via apkeep (apk-pure)
 #   KDECONNECT_APK                prebuilt KDE Connect apk; else downloaded via apkeep (f-droid)
@@ -70,9 +70,29 @@ if [ -z "$cli" ]; then
     else
         api="https://api.github.com/repos/ReVanced/revanced-cli/releases/latest"
     fi
-    url=$(curl -fsSL "$api" | grep -oE 'https://[^"]+revanced-cli[^"]*-all\.jar' | head -n1)
+    # Authenticate the API call when a token is available to avoid anonymous 403 rate limits.
+    gh_tok=${GH_TOKEN:-${GITHUB_TOKEN:-${ORG_GRADLE_PROJECT_githubPackagesPassword:-}}}
+    curl_auth=(); [ -n "$gh_tok" ] && curl_auth=(-H "Authorization: Bearer $gh_tok")
+    url=$(curl -fsSL "${curl_auth[@]}" "$api" | grep -oE 'https://[^"]+revanced-cli[^"]*-all\.jar' | head -n1)
     [ -n "$url" ] || { echo "could not resolve revanced-cli jar url" >&2; exit 1; }
     cli="$WORK/revanced-cli.jar"; curl -fsSL -o "$cli" "$url"
+fi
+
+# revanced-cli (>=6) signs with a BouncyCastle BKS keystore, while the Android/Gradle app build
+# needs PKCS12/JKS. Derive a BKS holding the SAME key so both sign with the same cert (the
+# CLIPBOARD_PUSH signature permission checks the cert, not the keystore format). BC provider ships
+# inside the cli jar.
+SIGN_KS="$KEYSTORE"
+if ! keytool -list -keystore "$KEYSTORE" -storepass "$KEYSTORE_PASS" -storetype BKS \
+        -provider org.bouncycastle.jce.provider.BouncyCastleProvider -providerpath "$cli" \
+        >/dev/null 2>&1; then
+    log "Converting keystore to BKS for revanced-cli signing"
+    SIGN_KS="$WORK/sign.bks"
+    keytool -importkeystore -noprompt \
+        -srckeystore "$KEYSTORE" -srcstorepass "$KEYSTORE_PASS" -srcalias "$KEY_ALIAS" -srckeypass "$KEY_PASS" \
+        -destkeystore "$SIGN_KS" -deststoretype BKS -deststorepass "$KEYSTORE_PASS" \
+        -destalias "$KEY_ALIAS" -destkeypass "$KEY_PASS" \
+        -provider org.bouncycastle.jce.provider.BouncyCastleProvider -providerpath "$cli"
 fi
 
 # --- 4. Helpers ---------------------------------------------------------------------------------
@@ -103,8 +123,10 @@ patch_app() {
     local base; base=$(base_apk "$@")
     log "revanced-cli patch $label: base=$(basename "$base")"
     local patched="$WORK/${label}-patched.apk"
-    java -jar "$cli" patch -p "$rvp" -o "$patched" \
-        --keystore "$KEYSTORE" --keystore-password "$KEYSTORE_PASS" \
+    # -b bypasses RVP signature/provenance verification (our bundle is built + used locally/CI,
+    # not fetched from the signed ReVanced repo).
+    java -jar "$cli" patch -p "$rvp" -b -o "$patched" \
+        --keystore "$SIGN_KS" --keystore-password "$KEYSTORE_PASS" \
         --keystore-entry-alias "$KEY_ALIAS" --keystore-entry-password "$KEY_PASS" \
         "$base"
     local dir="$OUT/$out"; rm -rf "$dir"; mkdir -p "$dir"
