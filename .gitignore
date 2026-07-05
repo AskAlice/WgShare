@@ -3,7 +3,7 @@
 /local.properties
 /.idea/
 .DS_Store
-/build/
+**/build/
 /captures/
 .externalNativeBuild/
 .cxx/
@@ -21,3 +21,5 @@
 /.cursor/
 /.kilocode/
 /.snapshots/
+/.metals/
+/.vscode/
