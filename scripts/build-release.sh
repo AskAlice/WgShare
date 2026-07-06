@@ -97,6 +97,15 @@ if ! keytool -list -keystore "$KEYSTORE" -storepass "$KEYSTORE_PASS" -storetype 
 fi
 
 # --- 4. Helpers ---------------------------------------------------------------------------------
+# apkeep with retries — F-Droid repo fetch/extract is intermittently flaky ("Please try again").
+apkeep_dl() {
+    local n; for n in 1 2 3 4 5; do
+        apkeep "$@" && return 0
+        log "apkeep attempt $n failed; retrying in $((n*5))s"; sleep $((n*5))
+    done
+    echo "apkeep failed after 5 attempts: $*" >&2; return 1
+}
+
 # Prints the .apk paths inside an artifact (single .apk or split .xapk/.apks/.zip).
 extract_apks() {
     local artifact="$1" dir
@@ -145,7 +154,7 @@ if [ "${SKIP_SWIFTKEY:-0}" != "1" ]; then
         sk_artifact=${SWIFTKEY_XAPK:-}
         if [ -z "$sk_artifact" ]; then
             log "Downloading SwiftKey via apkeep (apk-pure)"
-            apkeep -a com.touchtype.swiftkey -d apk-pure "$WORK"
+            apkeep_dl -a com.touchtype.swiftkey -d apk-pure "$WORK"
             sk_artifact=$(ls "$WORK"/com.touchtype.swiftkey.* | head -n1)
         fi
     fi
@@ -158,7 +167,7 @@ if [ "${SKIP_KDECONNECT:-0}" != "1" ]; then
     if [ -n "${KDECONNECT_APK:-}" ]; then kc_artifact="$KDECONNECT_APK"
     else
         log "Downloading KDE Connect via apkeep (f-droid)"
-        apkeep -a org.kde.kdeconnect_tp -d f-droid "$WORK"
+        apkeep_dl -a org.kde.kdeconnect_tp -d f-droid "$WORK"
         kc_artifact=$(ls "$WORK"/org.kde.kdeconnect_tp.* | head -n1)
     fi
     mapfile -t KC_APKS < <(extract_apks "$kc_artifact")
