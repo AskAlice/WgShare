@@ -166,9 +166,14 @@ fi
 if [ "${SKIP_KDECONNECT:-0}" != "1" ]; then
     if [ -n "${KDECONNECT_APK:-}" ]; then kc_artifact="$KDECONNECT_APK"
     else
-        log "Downloading KDE Connect via apkeep (f-droid)"
-        apkeep_dl -a org.kde.kdeconnect_tp -d f-droid "$WORK"
-        kc_artifact=$(ls "$WORK"/org.kde.kdeconnect_tp.* | head -n1)
+        # apkeep's f-droid backend intermittently fails to extract the repo index on CI,
+        # so pull the APK straight from the F-Droid API (suggested version) instead.
+        log "Downloading KDE Connect from F-Droid API"
+        kc_vc=$(curl -fsSL https://f-droid.org/api/v1/packages/org.kde.kdeconnect_tp \
+            | python3 -c 'import sys,json;print(json.load(sys.stdin)["suggestedVersionCode"])')
+        [ -n "$kc_vc" ] || { echo "could not resolve KDE Connect version from F-Droid" >&2; exit 1; }
+        kc_artifact="$WORK/org.kde.kdeconnect_tp.apk"
+        curl -fsSL -o "$kc_artifact" "https://f-droid.org/repo/org.kde.kdeconnect_tp_${kc_vc}.apk"
     fi
     mapfile -t KC_APKS < <(extract_apks "$kc_artifact")
     patch_app kdeconnect "kdeconnect-revanced-${VER_NAME}" "${KC_APKS[@]}"
