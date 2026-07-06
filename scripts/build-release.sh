@@ -127,6 +127,24 @@ base_apk() {
     ls -S "$@" | head -n1
 }
 
+# Locate apksigner from the installed Android build-tools (highest version wins).
+APKSIGNER=""
+find_apksigner() {
+    [ -n "$APKSIGNER" ] && return 0
+    local sdk="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$HOME/Android/Sdk}}"
+    APKSIGNER=$(ls "$sdk"/build-tools/*/apksigner 2>/dev/null | sort -V | tail -n1)
+    [ -z "$APKSIGNER" ] && APKSIGNER=$(command -v apksigner || true)
+    [ -n "$APKSIGNER" ] || { echo "apksigner not found (need Android build-tools)" >&2; return 1; }
+}
+
+# resign_apk <apk> : (re)sign an APK in place with the release key (PKCS12/JKS), v2+v3 schemes.
+resign_apk() {
+    find_apksigner || return 1
+    "$APKSIGNER" sign --ks "$KEYSTORE" --ks-pass "pass:$KEYSTORE_PASS" \
+        --ks-key-alias "$KEY_ALIAS" --key-pass "pass:$KEY_PASS" \
+        --v2-signing-enabled true --v3-signing-enabled true "$1"
+}
+
 # patch_app <label> <out-name> <apk...> : patches the base APK with our key, bundles splits.
 patch_app() {
     local label="$1" out="$2"; shift 2
@@ -141,8 +159,13 @@ patch_app() {
         "$base"
     local dir="$OUT/$out"; rm -rf "$dir"; mkdir -p "$dir"
     cp "$patched" "$dir/base.apk"
-    # carry untouched config splits (language/density/abi) for install alongside the patched base
-    local a; for a in "$@"; do [ "$a" = "$base" ] || cp "$a" "$dir/"; done
+    # carry config splits (language/density/abi); re-sign them with OUR key so the whole split set
+    # shares one signer — Android rejects a session where base and splits differ (INSTALL_FAILED_*).
+    local a; for a in "$@"; do
+        [ "$a" = "$base" ] && continue
+        cp "$a" "$dir/"
+        resign_apk "$dir/$(basename "$a")"
+    done
     ( cd "$OUT" && zip -qr "${out}.zip" "$out" )
     log "patched $label -> $OUT/${out}.zip (install the APKs together)"
 }
