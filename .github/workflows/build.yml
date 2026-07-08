@@ -41,8 +41,11 @@ jobs:
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
         run: |
-          test -n "$KEYSTORE_B64" || { echo "missing secret KEYSTORE_B64" >&2; exit 1; }
-          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.ks"
+          if [ -n "$KEYSTORE_B64" ]; then
+            echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.ks"
+          else
+            echo "WARN: KEYSTORE_B64 secret not set; build will be debug-signed and patching will be skipped" >&2
+          fi
       - name: Build + patch + sign
         env:
           VER_NAME: ${{ inputs.ver_name }}
